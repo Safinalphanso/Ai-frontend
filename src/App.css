@@ -302,6 +302,81 @@ textarea {
   border-top: 1px dashed var(--line);
 }
 
+.result-header h3 {
+  margin: 0 0 4px;
+  font-size: 1.1rem;
+}
+
+.result-summary {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.result-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+.result-action {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--teal);
+}
+
+.result-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 16px;
+}
+
+.result-grid .label,
+.task-row .label,
+.task-details .label,
+.history-header .label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.result-grid strong {
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.result-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.result-meta {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.result-conflict {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .tag {
   display: inline-block;
   font-family: "IBM Plex Mono", monospace;
@@ -392,7 +467,31 @@ pre {
   border-radius: 12px;
   padding: 12px 14px;
   display: grid;
-  gap: 4px;
+  gap: 8px;
+}
+
+.task-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-row.main {
+  align-items: flex-start;
+}
+
+.task-name {
+  font-size: 16px;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.task-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  padding-top: 4px;
+  border-top: 1px solid #f0ebe0;
 }
 
 .task.selected {
@@ -503,6 +602,30 @@ pre {
   border-top: 1px dashed var(--line);
 }
 
+.history-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.history-title {
+  margin: 0 0 4px;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.15rem;
+}
+
+.history-sub {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.history-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .history ol {
   margin: 0;
   padding-left: 18px;
@@ -523,7 +646,8 @@ pre {
 @media (max-width: 900px) {
   .layout,
   .row,
-  .subject-form {
+  .subject-form,
+  .result-grid {
     grid-template-columns: 1fr;
   }
 

@@ -9,16 +9,13 @@ const TABS = [
   { id: "confirm", label: "Needs confirmation" },
 ];
 
-function App() { 
+function App() {
   const [apiStatus, setApiStatus] = useState("checking");
-  const [subjectInput, setSubjectInput] = useState("");
-  const [subjects, setSubjects] = useState([]);
   const [text, setText] = useState("");
   const [source, setSource] = useState("whatsapp");
   const [receivedAt, setReceivedAt] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [subjectError, setSubjectError] = useState("");
   const [lastResult, setLastResult] = useState(null);
   const [tab, setTab] = useState("all");
   const [tasks, setTasks] = useState([]);
@@ -31,17 +28,6 @@ function App() {
       setApiStatus(data.message || "connected");
     } catch (err) {
       setApiStatus(`offline: ${err.message}`);
-    }
-  }, []);
-
-  const refreshSubjects = useCallback(async () => {
-    try {
-      const data = await api.courses();
-      setSubjects(Array.isArray(data) ? data : []);
-      setSubjectError("");
-    } catch (err) {
-      setSubjectError(err.message);
-      setSubjects([]);
     }
   }, []);
 
@@ -60,8 +46,7 @@ function App() {
 
   useEffect(() => {
     refreshHealth();
-    refreshSubjects();
-  }, [refreshHealth, refreshSubjects]);
+  }, [refreshHealth]);
 
   useEffect(() => {
     refreshTasks();
@@ -73,47 +58,9 @@ function App() {
     setReceivedAt(preset.received_at || "");
   }
 
-  async function handleAddSubjects(e) {
-    e?.preventDefault();
-    const raw = subjectInput.trim();
-    if (!raw) return;
-    setBusy(true);
-    setSubjectError("");
-    try {
-      const names = raw.split(/[,;]+/).map((s) => s.trim()).filter(Boolean);
-      if (names.length === 1) {
-        await api.addCourse(names[0]);
-      } else {
-        await api.addCourses(names);
-      }
-      setSubjectInput("");
-      await refreshSubjects();
-    } catch (err) {
-      setSubjectError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleRemoveSubject(id) {
-    setBusy(true);
-    try {
-      await api.deleteCourse(id);
-      await refreshSubjects();
-    } catch (err) {
-      setSubjectError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function handleIngest(e) {
     e?.preventDefault();
     if (!text.trim()) return;
-    if (subjects.length === 0) {
-      setError("Add your subjects first (e.g. Science, Maths, English).");
-      return;
-    }
     setBusy(true);
     setError("");
     try {
@@ -122,9 +69,8 @@ function App() {
       const result = await api.ingest(body);
       setLastResult(result);
       await refreshTasks();
-      if (result.results?.[0]?.task_id) {
-        setSelectedId(result.results[0].task_id);
-      }
+      const firstTask = result.items?.find((i) => i.task_id);
+      if (firstTask) setSelectedId(firstTask.task_id);
     } catch (err) {
       setError(err.message);
       setLastResult(null);
@@ -147,7 +93,7 @@ function App() {
   }
 
   async function handleReset() {
-    if (!confirm("Clear all messages and tasks? (Your subjects will stay.)")) return;
+    if (!confirm("Clear all messages, tasks, and courses?")) return;
     setBusy(true);
     try {
       await api.reset();
@@ -164,14 +110,13 @@ function App() {
   }
 
   const offline = apiStatus.startsWith("offline") || apiStatus === "checking";
-  const canIngest = subjects.length > 0 && !busy && !offline && text.trim();
 
   return (
     <div className="app">
       <header className="top">
         <div>
           <p className="brand">Deadline Agent</p>
-          <h1>Add your subjects, then forward messages.</h1>
+          <h1>Forward a message. See subject and deadline clearly.</h1>
         </div>
         <div className="top-actions">
           <span className={`pill ${offline ? "bad" : "ok"}`}>
@@ -181,158 +126,111 @@ function App() {
             Ping API
           </button>
           <button type="button" className="danger" onClick={handleReset} disabled={busy || offline}>
-            Reset tasks
+            Reset DB
           </button>
         </div>
       </header>
 
       <div className="layout">
-        <div className="left-column">
-          <section className="panel subjects">
-            <h2>My subjects</h2>
-            <p className="hint">
-              Step 1 — tell the agent what you study. Comma-separate to add several at once.
-            </p>
+        <section className="panel ingest">
+          <h2>Forward message</h2>
+          <p className="hint">Paste WhatsApp / email / class text. We extract subject, task, and due date.</p>
 
-            <form onSubmit={handleAddSubjects} className="subject-form">
-              <input
-                type="text"
-                value={subjectInput}
-                onChange={(e) => setSubjectInput(e.target.value)}
-                placeholder="Science, Maths, English"
-                disabled={busy || offline}
-              />
-              <button type="submit" className="primary" disabled={busy || offline || !subjectInput.trim()}>
-                Add
+          <div className="presets">
+            {DEMO_PRESETS.map((p) => (
+              <button key={p.id} type="button" className="chip" onClick={() => applyPreset(p)}>
+                {p.label}
               </button>
-            </form>
+            ))}
+          </div>
 
-            {subjectError && <p className="error">{subjectError}</p>}
+          <form onSubmit={handleIngest} className="form">
+            <label>
+              Message
+              <textarea
+                rows={5}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder='e.g. "Science lab report due Friday, 20%"'
+                required
+              />
+            </label>
 
-            <div className="subject-list">
-              {subjects.length === 0 ? (
-                <p className="empty">No subjects yet — add yours above.</p>
-              ) : (
-                subjects.map((s) => (
-                  <span key={s.id} className="subject-chip">
-                    {s.name}
-                    <button
-                      type="button"
-                      className="remove"
-                      onClick={() => handleRemoveSubject(s.id)}
-                      disabled={busy}
-                      title={`Remove ${s.name}`}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))
-              )}
-            </div>
-          </section>
-
-          <section className="panel ingest">
-            <h2>Forward message</h2>
-            <p className="hint">
-              Step 2 — paste a WhatsApp / email / class message. Deadlines are matched to your subjects.
-            </p>
-
-            {subjects.length === 0 && (
-              <p className="warn">Add at least one subject before ingesting messages.</p>
-            )}
-
-            <div className="presets">
-              {DEMO_PRESETS.map((p) => (
-                <button key={p.id} type="button" className="chip" onClick={() => applyPreset(p)}>
-                  {p.label}
-                </button>
-              ))}
-            </div>
-
-            <form onSubmit={handleIngest} className="form">
+            <div className="row">
               <label>
-                Message
-                <textarea
-                  rows={5}
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  placeholder='e.g. "Science lab report due Friday, 20%"'
-                  required
+                Source
+                <select value={source} onChange={(e) => setSource(e.target.value)}>
+                  <option value="whatsapp">whatsapp</option>
+                  <option value="email">email</option>
+                  <option value="class">class</option>
+                  <option value="syllabus">syllabus</option>
+                </select>
+              </label>
+              <label>
+                Received at (optional)
+                <input
+                  type="datetime-local"
+                  value={toLocalInput(receivedAt)}
+                  onChange={(e) => setReceivedAt(fromLocalInput(e.target.value))}
                 />
               </label>
+            </div>
 
-              <div className="row">
-                <label>
-                  Source
-                  <select value={source} onChange={(e) => setSource(e.target.value)}>
-                    <option value="whatsapp">whatsapp</option>
-                    <option value="email">email</option>
-                    <option value="class">class</option>
-                    <option value="syllabus">syllabus</option>
-                  </select>
-                </label>
-                <label>
-                  Received at (optional)
-                  <input
-                    type="datetime-local"
-                    value={toLocalInput(receivedAt)}
-                    onChange={(e) => setReceivedAt(fromLocalInput(e.target.value))}
-                  />
-                </label>
+            <button type="submit" className="primary" disabled={busy || offline || !text.trim()}>
+              {busy ? "Working…" : "Ingest message"}
+            </button>
+          </form>
+
+          {error && <p className="error">{error}</p>}
+
+          {lastResult && (
+            <div className="result">
+              <div className="result-header">
+                <h3>{lastResult.outcome_label}</h3>
+                <p className="result-summary">{lastResult.summary}</p>
               </div>
 
-              <button type="submit" className="primary" disabled={!canIngest}>
-                {busy ? "Working…" : "Ingest message"}
-              </button>
-            </form>
-
-            {error && <p className="error">{error}</p>}
-
-            {lastResult && (
-              <div className="result">
-                <h3>
-                  Last result · <span className="tag">{lastResult.classification}</span>
-                </h3>
-                <ul className="result-list">
-                  {(lastResult.results || []).map((r, i) => (
-                    <li key={i}>
-                      <strong>{r.action || r.classification}</strong>
-                      {r.extraction?.course && (
-                        <span className="course-tag">{r.extraction.course}</span>
-                      )}
-                      {r.extraction?.title && (
-                        <span className="task-title-inline"> · {r.extraction.title}</span>
-                      )}
-                      {r.task_id && (
-                        <>
-                          {" "}
-                          · task{" "}
-                          <button type="button" className="linkish" onClick={() => handleSelectTask(r.task_id)}>
-                            {r.task_id.slice(-6)}
-                          </button>
-                        </>
-                      )}
-                      {r.kept_due_date && (
-                        <span>
-                          {" "}
-                          · kept {r.kept_due_date} vs reported {r.reported_due_date}
-                        </span>
-                      )}
-                      {r.extraction?.reasoning && <p className="reason">{r.extraction.reasoning}</p>}
-                      {r.extraction?.date_resolution_note && (
-                        <p className="note">{r.extraction.date_resolution_note}</p>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-                <details>
-                  <summary>Raw JSON</summary>
-                  <pre>{JSON.stringify(lastResult, null, 2)}</pre>
-                </details>
-              </div>
-            )}
-          </section>
-        </div>
+              {(lastResult.items || []).map((item, i) => (
+                <div key={i} className="result-card">
+                  <p className="result-action">{item.action_label}</p>
+                  {item.subject || item.task ? (
+                    <div className="result-grid">
+                      <div>
+                        <span className="label">Subject</span>
+                        <strong>{item.subject || "—"}</strong>
+                      </div>
+                      <div>
+                        <span className="label">Task</span>
+                        <strong>{item.task || "—"}</strong>
+                      </div>
+                      <div>
+                        <span className="label">Due</span>
+                        <strong>{item.due_display || "Date unknown"}</strong>
+                      </div>
+                      <div>
+                        <span className="label">Status</span>
+                        <strong>{item.status_label || "—"}</strong>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="result-empty">{item.summary}</p>
+                  )}
+                  {item.weightage_display && (
+                    <p className="result-meta">Weightage: {item.weightage_display}</p>
+                  )}
+                  {item.conflict && (
+                    <p className="result-conflict">{item.conflict.message}</p>
+                  )}
+                  {item.task_id && (
+                    <button type="button" className="linkish" onClick={() => handleSelectTask(item.task_id)}>
+                      View in task list →
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
         <section className="panel tasks">
           <div className="tabs">
@@ -360,22 +258,34 @@ function App() {
                 className={`task ${selectedId === t.id ? "selected" : ""}`}
                 onClick={() => handleSelectTask(t.id)}
               >
-                <div className="task-top">
-                  <span className={`course-badge ${t.course ? "" : "missing"}`}>
-                    {t.course || "No subject"}
-                  </span>
-                  <span className="due">{t.due_date || "no date"}</span>
-                </div>
-                <strong>{t.title}</strong>
-                <div className="task-meta-row">
-                  <span className={`status ${t.status}`}>{t.status}</span>
-                  <span className="meta">
-                    {t.task_type}
-                    {t.weightage != null ? ` · ${t.weightage}%` : ""}
+                <div className="task-row">
+                  <span className="label">Subject</span>
+                  <span className={`course-badge ${t.subject ? "" : "missing"}`}>
+                    {t.subject || "General"}
                   </span>
                 </div>
-                {t.claimed_due_dates?.length > 1 && (
-                  <span className="claims">claimed: {t.claimed_due_dates.join(" vs ")}</span>
+                <div className="task-row main">
+                  <span className="label">Task</span>
+                  <strong className="task-name">{t.task}</strong>
+                </div>
+                <div className="task-details">
+                  <div>
+                    <span className="label">Due</span>
+                    <span className="due">{t.due_display}</span>
+                  </div>
+                  <div>
+                    <span className="label">Status</span>
+                    <span className={`status ${t.status}`}>{t.status_label}</span>
+                  </div>
+                  {t.weightage_display && (
+                    <div>
+                      <span className="label">Weight</span>
+                      <span className="meta">{t.weightage_display}</span>
+                    </div>
+                  )}
+                </div>
+                {t.conflict_display && (
+                  <p className="claims">Conflicting dates: {t.conflict_display}</p>
                 )}
               </button>
             ))}
@@ -383,16 +293,18 @@ function App() {
 
           {history && (
             <div className="history">
-              <h3>
-                History ·{" "}
-                <span className="course-badge small">{history.task?.course || "No subject"}</span>{" "}
-                {history.task?.title}
-              </h3>
-              <ol>
+              <div className="history-header">
+                <span className="label">Subject</span>
+                <span className="course-badge small">{history.task?.subject || "General"}</span>
+              </div>
+              <h3 className="history-title">{history.task?.task}</h3>
+              <p className="history-sub">
+                Due {history.task?.due_display} · {history.task?.status_label}
+              </p>
+              <ol className="history-list">
                 {(history.versions || []).map((v) => (
                   <li key={v.id}>
-                    <code>{v.reason}</code> · {v.due_date || "null"}
-                    {v.date_resolution_note && <p className="note">{v.date_resolution_note}</p>}
+                    <strong>{v.reason_label}</strong> — {v.due_display}
                     {v.source_excerpt && <p className="excerpt">“{v.source_excerpt}”</p>}
                   </li>
                 ))}
