@@ -11,11 +11,14 @@ const TABS = [
 
 function App() {
   const [apiStatus, setApiStatus] = useState("checking");
+  const [subjectInput, setSubjectInput] = useState("");
+  const [subjects, setSubjects] = useState([]);
   const [text, setText] = useState("");
   const [source, setSource] = useState("whatsapp");
   const [receivedAt, setReceivedAt] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [subjectError, setSubjectError] = useState("");
   const [lastResult, setLastResult] = useState(null);
   const [tab, setTab] = useState("all");
   const [tasks, setTasks] = useState([]);
@@ -28,6 +31,17 @@ function App() {
       setApiStatus(data.message || "connected");
     } catch (err) {
       setApiStatus(`offline: ${err.message}`);
+    }
+  }, []);
+
+  const refreshSubjects = useCallback(async () => {
+    try {
+      const data = await api.courses();
+      setSubjects(Array.isArray(data) ? data : []);
+      setSubjectError("");
+    } catch (err) {
+      setSubjectError(err.message);
+      setSubjects([]);
     }
   }, []);
 
@@ -46,7 +60,8 @@ function App() {
 
   useEffect(() => {
     refreshHealth();
-  }, [refreshHealth]);
+    refreshSubjects();
+  }, [refreshHealth, refreshSubjects]);
 
   useEffect(() => {
     refreshTasks();
@@ -58,9 +73,47 @@ function App() {
     setReceivedAt(preset.received_at || "");
   }
 
+  async function handleAddSubjects(e) {
+    e?.preventDefault();
+    const raw = subjectInput.trim();
+    if (!raw) return;
+    setBusy(true);
+    setSubjectError("");
+    try {
+      const names = raw.split(/[,;]+/).map((s) => s.trim()).filter(Boolean);
+      if (names.length === 1) {
+        await api.addCourse(names[0]);
+      } else {
+        await api.addCourses(names);
+      }
+      setSubjectInput("");
+      await refreshSubjects();
+    } catch (err) {
+      setSubjectError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRemoveSubject(id) {
+    setBusy(true);
+    try {
+      await api.deleteCourse(id);
+      await refreshSubjects();
+    } catch (err) {
+      setSubjectError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleIngest(e) {
     e?.preventDefault();
     if (!text.trim()) return;
+    if (subjects.length === 0) {
+      setError("Add your subjects first (e.g. Science, Maths, English).");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -94,7 +147,7 @@ function App() {
   }
 
   async function handleReset() {
-    if (!confirm("Clear all messages, tasks, and versions?")) return;
+    if (!confirm("Clear all messages and tasks? (Your subjects will stay.)")) return;
     setBusy(true);
     try {
       await api.reset();
@@ -111,13 +164,14 @@ function App() {
   }
 
   const offline = apiStatus.startsWith("offline") || apiStatus === "checking";
+  const canIngest = subjects.length > 0 && !busy && !offline && text.trim();
 
   return (
     <div className="app">
       <header className="top">
         <div>
           <p className="brand">Deadline Agent</p>
-          <h1>Forward a message. Inspect what landed in the DB.</h1>
+          <h1>Add your subjects, then forward messages.</h1>
         </div>
         <div className="top-actions">
           <span className={`pill ${offline ? "bad" : "ok"}`}>
@@ -127,101 +181,158 @@ function App() {
             Ping API
           </button>
           <button type="button" className="danger" onClick={handleReset} disabled={busy || offline}>
-            Reset DB
+            Reset tasks
           </button>
         </div>
       </header>
 
       <div className="layout">
-        <section className="panel ingest">
-          <h2>Forward message</h2>
-          <p className="hint">Paste WhatsApp / email / class text. Use presets for the demo cases.</p>
+        <div className="left-column">
+          <section className="panel subjects">
+            <h2>My subjects</h2>
+            <p className="hint">
+              Step 1 — tell the agent what you study. Comma-separate to add several at once.
+            </p>
 
-          <div className="presets">
-            {DEMO_PRESETS.map((p) => (
-              <button key={p.id} type="button" className="chip" onClick={() => applyPreset(p)}>
-                {p.label}
-              </button>
-            ))}
-          </div>
-
-          <form onSubmit={handleIngest} className="form">
-            <label>
-              Message
-              <textarea
-                rows={5}
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder='e.g. "DBMS report due 25th not 28th"'
-                required
+            <form onSubmit={handleAddSubjects} className="subject-form">
+              <input
+                type="text"
+                value={subjectInput}
+                onChange={(e) => setSubjectInput(e.target.value)}
+                placeholder="Science, Maths, English"
+                disabled={busy || offline}
               />
-            </label>
+              <button type="submit" className="primary" disabled={busy || offline || !subjectInput.trim()}>
+                Add
+              </button>
+            </form>
 
-            <div className="row">
+            {subjectError && <p className="error">{subjectError}</p>}
+
+            <div className="subject-list">
+              {subjects.length === 0 ? (
+                <p className="empty">No subjects yet — add yours above.</p>
+              ) : (
+                subjects.map((s) => (
+                  <span key={s.id} className="subject-chip">
+                    {s.name}
+                    <button
+                      type="button"
+                      className="remove"
+                      onClick={() => handleRemoveSubject(s.id)}
+                      disabled={busy}
+                      title={`Remove ${s.name}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="panel ingest">
+            <h2>Forward message</h2>
+            <p className="hint">
+              Step 2 — paste a WhatsApp / email / class message. Deadlines are matched to your subjects.
+            </p>
+
+            {subjects.length === 0 && (
+              <p className="warn">Add at least one subject before ingesting messages.</p>
+            )}
+
+            <div className="presets">
+              {DEMO_PRESETS.map((p) => (
+                <button key={p.id} type="button" className="chip" onClick={() => applyPreset(p)}>
+                  {p.label}
+                </button>
+              ))}
+            </div>
+
+            <form onSubmit={handleIngest} className="form">
               <label>
-                Source
-                <select value={source} onChange={(e) => setSource(e.target.value)}>
-                  <option value="whatsapp">whatsapp</option>
-                  <option value="email">email</option>
-                  <option value="class">class</option>
-                  <option value="syllabus">syllabus</option>
-                </select>
-              </label>
-              <label>
-                Received at (ISO, optional)
-                <input
-                  type="datetime-local"
-                  value={toLocalInput(receivedAt)}
-                  onChange={(e) => setReceivedAt(fromLocalInput(e.target.value))}
+                Message
+                <textarea
+                  rows={5}
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder='e.g. "Science lab report due Friday, 20%"'
+                  required
                 />
               </label>
-            </div>
 
-            <button type="submit" className="primary" disabled={busy || offline || !text.trim()}>
-              {busy ? "Working…" : "Ingest message"}
-            </button>
-          </form>
+              <div className="row">
+                <label>
+                  Source
+                  <select value={source} onChange={(e) => setSource(e.target.value)}>
+                    <option value="whatsapp">whatsapp</option>
+                    <option value="email">email</option>
+                    <option value="class">class</option>
+                    <option value="syllabus">syllabus</option>
+                  </select>
+                </label>
+                <label>
+                  Received at (optional)
+                  <input
+                    type="datetime-local"
+                    value={toLocalInput(receivedAt)}
+                    onChange={(e) => setReceivedAt(fromLocalInput(e.target.value))}
+                  />
+                </label>
+              </div>
 
-          {error && <p className="error">{error}</p>}
+              <button type="submit" className="primary" disabled={!canIngest}>
+                {busy ? "Working…" : "Ingest message"}
+              </button>
+            </form>
 
-          {lastResult && (
-            <div className="result">
-              <h3>
-                Last result · <span className="tag">{lastResult.classification}</span>
-              </h3>
-              <ul className="result-list">
-                {(lastResult.results || []).map((r, i) => (
-                  <li key={i}>
-                    <strong>{r.action || r.classification}</strong>
-                    {r.task_id && (
-                      <>
-                        {" "}
-                        · task{" "}
-                        <button type="button" className="linkish" onClick={() => handleSelectTask(r.task_id)}>
-                          {r.task_id.slice(-6)}
-                        </button>
-                      </>
-                    )}
-                    {r.kept_due_date && (
-                      <span>
-                        {" "}
-                        · kept {r.kept_due_date} vs reported {r.reported_due_date}
-                      </span>
-                    )}
-                    {r.extraction?.reasoning && <p className="reason">{r.extraction.reasoning}</p>}
-                    {r.extraction?.date_resolution_note && (
-                      <p className="note">{r.extraction.date_resolution_note}</p>
-                    )}
-                  </li>
-                ))}
-              </ul>
-              <details>
-                <summary>Raw JSON</summary>
-                <pre>{JSON.stringify(lastResult, null, 2)}</pre>
-              </details>
-            </div>
-          )}
-        </section>
+            {error && <p className="error">{error}</p>}
+
+            {lastResult && (
+              <div className="result">
+                <h3>
+                  Last result · <span className="tag">{lastResult.classification}</span>
+                </h3>
+                <ul className="result-list">
+                  {(lastResult.results || []).map((r, i) => (
+                    <li key={i}>
+                      <strong>{r.action || r.classification}</strong>
+                      {r.extraction?.course && (
+                        <span className="course-tag">{r.extraction.course}</span>
+                      )}
+                      {r.extraction?.title && (
+                        <span className="task-title-inline"> · {r.extraction.title}</span>
+                      )}
+                      {r.task_id && (
+                        <>
+                          {" "}
+                          · task{" "}
+                          <button type="button" className="linkish" onClick={() => handleSelectTask(r.task_id)}>
+                            {r.task_id.slice(-6)}
+                          </button>
+                        </>
+                      )}
+                      {r.kept_due_date && (
+                        <span>
+                          {" "}
+                          · kept {r.kept_due_date} vs reported {r.reported_due_date}
+                        </span>
+                      )}
+                      {r.extraction?.reasoning && <p className="reason">{r.extraction.reasoning}</p>}
+                      {r.extraction?.date_resolution_note && (
+                        <p className="note">{r.extraction.date_resolution_note}</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                <details>
+                  <summary>Raw JSON</summary>
+                  <pre>{JSON.stringify(lastResult, null, 2)}</pre>
+                </details>
+              </div>
+            )}
+          </section>
+        </div>
 
         <section className="panel tasks">
           <div className="tabs">
@@ -250,16 +361,19 @@ function App() {
                 onClick={() => handleSelectTask(t.id)}
               >
                 <div className="task-top">
-                  <span className={`status ${t.status}`}>{t.status}</span>
+                  <span className={`course-badge ${t.course ? "" : "missing"}`}>
+                    {t.course || "No subject"}
+                  </span>
                   <span className="due">{t.due_date || "no date"}</span>
                 </div>
-                <strong>
-                  [{t.course || "?"}] {t.title}
-                </strong>
-                <span className="meta">
-                  {t.task_type}
-                  {t.weightage != null ? ` · ${t.weightage}%` : ""}
-                </span>
+                <strong>{t.title}</strong>
+                <div className="task-meta-row">
+                  <span className={`status ${t.status}`}>{t.status}</span>
+                  <span className="meta">
+                    {t.task_type}
+                    {t.weightage != null ? ` · ${t.weightage}%` : ""}
+                  </span>
+                </div>
                 {t.claimed_due_dates?.length > 1 && (
                   <span className="claims">claimed: {t.claimed_due_dates.join(" vs ")}</span>
                 )}
@@ -269,7 +383,11 @@ function App() {
 
           {history && (
             <div className="history">
-              <h3>History · {history.task?.title}</h3>
+              <h3>
+                History ·{" "}
+                <span className="course-badge small">{history.task?.course || "No subject"}</span>{" "}
+                {history.task?.title}
+              </h3>
               <ol>
                 {(history.versions || []).map((v) => (
                   <li key={v.id}>

@@ -14,6 +14,10 @@ async function request(path, options = {}) {
 
 export const api = {
   health: () => request("/"),
+  courses: () => request("/courses"),
+  addCourse: (name) => request("/courses", { method: "POST", body: JSON.stringify({ name }) }),
+  addCourses: (names) => request("/courses", { method: "POST", body: JSON.stringify({ names }) }),
+  deleteCourse: (id) => request(`/courses/${id}`, { method: "DELETE" }),
   ingest: (body) => request("/ingest", { method: "POST", body: JSON.stringify(body) }),
   listTasks: () => request("/tasks"),
   dueThisWeek: () => request("/tasks/due-this-week"),
