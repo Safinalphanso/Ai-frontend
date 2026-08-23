@@ -1,0 +1,51 @@
+export const DEMO_PRESETS = [
+  {
+    id: "noise",
+    label: "Noise",
+    text: "anyone up for football at 6?",
+    source: "whatsapp",
+    received_at: "",
+  },
+  {
+    id: "new-dbms",
+    label: "New DBMS report",
+    text: "DBMS report submission on 28th August, worth 20% of grade. Submit on LMS.",
+    source: "email",
+    received_at: "2026-08-20T11:00:00.000Z",
+  },
+  {
+    id: "correction",
+    label: "Correction (25th not 28th)",
+    text: "DBMS report due 25th not 28th",
+    source: "whatsapp",
+    received_at: "2026-08-22T09:00:00.000Z",
+  },
+  {
+    id: "unknown",
+    label: "Unknown deadline",
+    text: "Hackathon registration closes soon, don't miss it!!!",
+    source: "whatsapp",
+    received_at: "2026-08-21T09:00:00.000Z",
+  },
+  {
+    id: "os-setup",
+    label: "OS lab setup (28 Aug)",
+    text: "Reminder from Prof Rao: OS Lab 3 is due Friday 28 August. Bring printed output.",
+    source: "class",
+    received_at: "2026-08-20T12:30:00.000Z",
+  },
+  {
+    id: "next-friday",
+    label: "Conflict: next Friday",
+    text: "OS lab due next Friday",
+    source: "whatsapp",
+    received_at: "2026-08-24T09:02:00.000Z",
+  },
+  {
+    id: "this-friday",
+    label: "Confirm: this Friday",
+    text: "OS lab submission deadline: this Friday",
+    source: "email",
+    received_at: "2026-08-25T18:40:00.000Z",
+  },
+];
