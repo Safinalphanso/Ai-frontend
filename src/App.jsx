@@ -9,7 +9,7 @@ const TABS = [
   { id: "confirm", label: "Needs confirmation" },
 ];
 
-function App() {
+function App() { 
   const [apiStatus, setApiStatus] = useState("checking");
   const [subjectInput, setSubjectInput] = useState("");
   const [subjects, setSubjects] = useState([]);
