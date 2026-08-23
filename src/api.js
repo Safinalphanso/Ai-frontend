@@ -15,6 +15,8 @@ async function request(path, options = {}) {
 export const api = {
   health: () => request("/"),
   ingest: (body) => request("/ingest", { method: "POST", body: JSON.stringify(body) }),
+  ingestBatch: (body) =>
+    request("/ingest-batch", { method: "POST", body: JSON.stringify(body) }),
   listTasks: () => request("/tasks"),
   dueThisWeek: () => request("/tasks/due-this-week"),
   needsConfirmation: () => request("/tasks/needs-confirmation"),

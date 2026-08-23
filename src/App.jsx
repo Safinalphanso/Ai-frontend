@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, API_URL } from "./api";
 import { DEMO_PRESETS } from "./presets";
+import { splitMessages, MAX_BATCH } from "./splitMessages";
 import "./App.css";
 
 const TABS = [
@@ -13,14 +14,18 @@ function App() {
   const [apiStatus, setApiStatus] = useState("checking");
   const [text, setText] = useState("");
   const [source, setSource] = useState("whatsapp");
-  const [receivedAt, setReceivedAt] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [lastResult, setLastResult] = useState(null);
+  const [batchResult, setBatchResult] = useState(null);
+  const [progress, setProgress] = useState(null);
   const [tab, setTab] = useState("all");
   const [tasks, setTasks] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [history, setHistory] = useState(null);
+
+  const messages = useMemo(() => splitMessages(text), [text]);
+  const messageCount = messages.length;
 
   const refreshHealth = useCallback(async () => {
     try {
@@ -55,26 +60,78 @@ function App() {
   function applyPreset(preset) {
     setText(preset.text);
     setSource(preset.source);
-    setReceivedAt(preset.received_at || "");
   }
 
   async function handleIngest(e) {
     e?.preventDefault();
     if (!text.trim()) return;
+
+    if (messageCount > MAX_BATCH) {
+      setError(`Too many messages (${messageCount}). Max is ${MAX_BATCH} per run.`);
+      return;
+    }
+
     setBusy(true);
     setError("");
+    setLastResult(null);
+    setBatchResult(null);
+
     try {
-      const body = { text: text.trim(), source };
-      if (receivedAt.trim()) body.received_at = new Date(receivedAt).toISOString();
-      const result = await api.ingest(body);
-      setLastResult(result);
+      if (messageCount <= 1) {
+        const result = await api.ingest({ text: messages[0] || text.trim(), source });
+        setLastResult(result);
+        await refreshTasks();
+        const firstTask = result.items?.find((i) => i.task_id);
+        if (firstTask) setSelectedId(firstTask.task_id);
+        return;
+      }
+
+      // Process one-by-one so the UI can show live progress (and avoid long HTTP timeouts).
+      const counts = { noise: 0, new_task: 0, update: 0, contradiction: 0, error: 0 };
+      const results = [];
+
+      for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i];
+        setProgress({
+          current: i + 1,
+          total: messages.length,
+          preview: msg.length > 60 ? `${msg.slice(0, 60)}…` : msg,
+        });
+
+        try {
+          const result = await api.ingest({ text: msg, source });
+          results.push({
+            index: i + 1,
+            preview: msg.length > 80 ? `${msg.slice(0, 80)}…` : msg,
+            ok: true,
+            ...result,
+          });
+          if (counts[result.outcome] != null) counts[result.outcome] += 1;
+        } catch (err) {
+          counts.error += 1;
+          results.push({
+            index: i + 1,
+            preview: msg.length > 80 ? `${msg.slice(0, 80)}…` : msg,
+            ok: false,
+            error: err.message,
+          });
+        }
+      }
+
+      const ok = results.filter((r) => r.ok).length;
+      setBatchResult({
+        total: messages.length,
+        processed: ok,
+        failed: counts.error,
+        counts,
+        summary: `Processed ${ok}/${messages.length} — new: ${counts.new_task}, updated: ${counts.update}, needs confirmation: ${counts.contradiction}, noise: ${counts.noise}, errors: ${counts.error}`,
+        results,
+      });
       await refreshTasks();
-      const firstTask = result.items?.find((i) => i.task_id);
-      if (firstTask) setSelectedId(firstTask.task_id);
     } catch (err) {
       setError(err.message);
-      setLastResult(null);
     } finally {
+      setProgress(null);
       setBusy(false);
     }
   }
@@ -98,6 +155,7 @@ function App() {
     try {
       await api.reset();
       setLastResult(null);
+      setBatchResult(null);
       setHistory(null);
       setSelectedId(null);
       setText("");
@@ -110,6 +168,14 @@ function App() {
   }
 
   const offline = apiStatus.startsWith("offline") || apiStatus === "checking";
+  const ingestLabel =
+    busy && progress
+      ? `Ingesting ${progress.current}/${progress.total}…`
+      : busy
+        ? "Working…"
+        : messageCount > 1
+          ? `Ingest ${messageCount} messages`
+          : "Ingest message";
 
   return (
     <div className="app">
@@ -133,8 +199,11 @@ function App() {
 
       <div className="layout">
         <section className="panel ingest">
-          <h2>Forward message</h2>
-          <p className="hint">Paste WhatsApp / email / class text. We extract subject, task, and due date.</p>
+          <h2>Forward message(s)</h2>
+          <p className="hint">
+            Paste one message, or many — one per line, or blank line between multi-line messages.
+            Up to {MAX_BATCH} at a time. Relative dates use today.
+          </p>
 
           <div className="presets">
             {DEMO_PRESETS.map((p) => (
@@ -146,88 +215,99 @@ function App() {
 
           <form onSubmit={handleIngest} className="form">
             <label>
-              Message
+              Message{messageCount > 1 ? "s" : ""}
               <textarea
-                rows={5}
+                rows={messageCount > 3 ? 10 : 5}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder='e.g. "Science lab report due Friday, 20%"'
+                placeholder={
+                  "One message:\nScience lab report due Friday\n\nOr many (one per line):\nScience quiz tomorrow\nMaths worksheet due next Friday\nanyone for football?"
+                }
                 required
               />
             </label>
 
-            <div className="row">
-              <label>
-                Source
-                <select value={source} onChange={(e) => setSource(e.target.value)}>
-                  <option value="whatsapp">whatsapp</option>
-                  <option value="email">email</option>
-                  <option value="class">class</option>
-                  <option value="syllabus">syllabus</option>
-                </select>
-              </label>
-              <label>
-                Received at (optional)
-                <input
-                  type="datetime-local"
-                  value={toLocalInput(receivedAt)}
-                  onChange={(e) => setReceivedAt(fromLocalInput(e.target.value))}
-                />
-              </label>
-            </div>
+            {messageCount > 0 && (
+              <p className={`batch-count ${messageCount > MAX_BATCH ? "over" : ""}`}>
+                {messageCount} message{messageCount === 1 ? "" : "s"} detected
+                {messageCount > MAX_BATCH ? ` (max ${MAX_BATCH})` : ""}
+                {messageCount > 5
+                  ? " · large batches take ~12s each due to API rate limits"
+                  : ""}
+              </p>
+            )}
 
-            <button type="submit" className="primary" disabled={busy || offline || !text.trim()}>
-              {busy ? "Working…" : "Ingest message"}
+            <label>
+              Source
+              <select value={source} onChange={(e) => setSource(e.target.value)}>
+                <option value="whatsapp">whatsapp</option>
+                <option value="email">email</option>
+                <option value="class">class</option>
+                <option value="syllabus">syllabus</option>
+              </select>
+            </label>
+
+            <button
+              type="submit"
+              className="primary"
+              disabled={busy || offline || !text.trim() || messageCount > MAX_BATCH}
+            >
+              {ingestLabel}
             </button>
           </form>
 
+          {progress && (
+            <div className="progress">
+              <div className="progress-bar">
+                <div
+                  className="progress-fill"
+                  style={{ width: `${(progress.current / progress.total) * 100}%` }}
+                />
+              </div>
+              <p className="progress-text">
+                {progress.current}/{progress.total}: {progress.preview}
+              </p>
+            </div>
+          )}
+
           {error && <p className="error">{error}</p>}
 
-          {lastResult && (
+          {lastResult && !batchResult && (
             <div className="result">
               <div className="result-header">
                 <h3>{lastResult.outcome_label}</h3>
                 <p className="result-summary">{lastResult.summary}</p>
               </div>
-
               {(lastResult.items || []).map((item, i) => (
-                <div key={i} className="result-card">
-                  <p className="result-action">{item.action_label}</p>
-                  {item.subject || item.task ? (
-                    <div className="result-grid">
-                      <div>
-                        <span className="label">Subject</span>
-                        <strong>{item.subject || "—"}</strong>
-                      </div>
-                      <div>
-                        <span className="label">Task</span>
-                        <strong>{item.task || "—"}</strong>
-                      </div>
-                      <div>
-                        <span className="label">Due</span>
-                        <strong>{item.due_display || "Date unknown"}</strong>
-                      </div>
-                      <div>
-                        <span className="label">Status</span>
-                        <strong>{item.status_label || "—"}</strong>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="result-empty">{item.summary}</p>
-                  )}
-                  {item.weightage_display && (
-                    <p className="result-meta">Weightage: {item.weightage_display}</p>
-                  )}
-                  {item.conflict && (
-                    <p className="result-conflict">{item.conflict.message}</p>
-                  )}
-                  {item.task_id && (
-                    <button type="button" className="linkish" onClick={() => handleSelectTask(item.task_id)}>
-                      View in task list →
-                    </button>
-                  )}
-                </div>
+                <ResultCard key={i} item={item} onView={handleSelectTask} />
               ))}
+            </div>
+          )}
+
+          {batchResult && (
+            <div className="result">
+              <div className="result-header">
+                <h3>Batch complete</h3>
+                <p className="result-summary">{batchResult.summary}</p>
+              </div>
+              <div className="batch-list">
+                {batchResult.results.map((r) => (
+                  <div key={r.index} className={`batch-row ${r.ok ? "" : "fail"}`}>
+                    <span className="batch-idx">#{r.index}</span>
+                    <div className="batch-body">
+                      <p className="batch-preview">{r.preview}</p>
+                      {r.ok ? (
+                        <p className="batch-outcome">
+                          {r.outcome_label}
+                          {r.items?.[0]?.summary ? ` — ${r.items[0].summary}` : ""}
+                        </p>
+                      ) : (
+                        <p className="batch-outcome fail-text">{r.error}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </section>
@@ -317,17 +397,43 @@ function App() {
   );
 }
 
-function toLocalInput(iso) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function fromLocalInput(local) {
-  if (!local) return "";
-  return new Date(local).toISOString();
+function ResultCard({ item, onView }) {
+  return (
+    <div className="result-card">
+      <p className="result-action">{item.action_label}</p>
+      {item.subject || item.task ? (
+        <div className="result-grid">
+          <div>
+            <span className="label">Subject</span>
+            <strong>{item.subject || "—"}</strong>
+          </div>
+          <div>
+            <span className="label">Task</span>
+            <strong>{item.task || "—"}</strong>
+          </div>
+          <div>
+            <span className="label">Due</span>
+            <strong>{item.due_display || "Date unknown"}</strong>
+          </div>
+          <div>
+            <span className="label">Status</span>
+            <strong>{item.status_label || "—"}</strong>
+          </div>
+        </div>
+      ) : (
+        <p className="result-empty">{item.summary}</p>
+      )}
+      {item.weightage_display && (
+        <p className="result-meta">Weightage: {item.weightage_display}</p>
+      )}
+      {item.conflict && <p className="result-conflict">{item.conflict.message}</p>}
+      {item.task_id && (
+        <button type="button" className="linkish" onClick={() => onView(item.task_id)}>
+          View in task list →
+        </button>
+      )}
+    </div>
+  );
 }
 
 export default App;
