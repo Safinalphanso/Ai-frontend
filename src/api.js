@@ -16,7 +16,11 @@ export const api = {
   health: () => request("/"),
   ingest: (body) => request("/ingest", { method: "POST", body: JSON.stringify(body) }),
   ingestBatch: (body) =>
-    request("/ingest-batch", { method: "POST", body: JSON.stringify(body) }),
+    request("/ingest-batch", {
+      method: "POST",
+      body: JSON.stringify(body),
+      // Long batch can take a few minutes if Gemini is slow
+    }),
   listTasks: () => request("/tasks"),
   dueThisWeek: () => request("/tasks/due-this-week"),
   needsConfirmation: () => request("/tasks/needs-confirmation"),

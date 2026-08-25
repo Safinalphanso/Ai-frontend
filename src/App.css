@@ -189,6 +189,19 @@
   margin-bottom: 16px;
 }
 
+.chip.corpus {
+  background: var(--teal-soft);
+  border-color: #b8ddd3;
+  color: var(--teal);
+  font-weight: 600;
+}
+
+.chip.corpus:hover {
+  background: var(--teal);
+  color: #fff;
+  border-color: var(--teal);
+}
+
 .chip,
 button {
   font: inherit;

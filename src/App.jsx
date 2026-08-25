@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, API_URL } from "./api";
 import { DEMO_PRESETS } from "./presets";
+import { FRONTEND_TEST_CORPUS, FRONTEND_TEST_CORPUS_TEXT, CORPUS_STATS } from "./testCorpus";
 import { splitMessages, MAX_BATCH } from "./splitMessages";
 import "./App.css";
 
@@ -62,6 +63,14 @@ function App() {
     setSource(preset.source);
   }
 
+  function loadTestCorpus() {
+    setText(FRONTEND_TEST_CORPUS_TEXT);
+    setSource("whatsapp");
+    setLastResult(null);
+    setBatchResult(null);
+    setError("");
+  }
+
   async function handleIngest(e) {
     e?.preventDefault();
     if (!text.trim()) return;
@@ -86,47 +95,15 @@ function App() {
         return;
       }
 
-      // Process one-by-one so the UI can show live progress (and avoid long HTTP timeouts).
-      const counts = { noise: 0, new_task: 0, update: 0, contradiction: 0, error: 0 };
-      const results = [];
-
-      for (let i = 0; i < messages.length; i++) {
-        const msg = messages[i];
-        setProgress({
-          current: i + 1,
-          total: messages.length,
-          preview: msg.length > 60 ? `${msg.slice(0, 60)}…` : msg,
-        });
-
-        try {
-          const result = await api.ingest({ text: msg, source });
-          results.push({
-            index: i + 1,
-            preview: msg.length > 80 ? `${msg.slice(0, 80)}…` : msg,
-            ok: true,
-            ...result,
-          });
-          if (counts[result.outcome] != null) counts[result.outcome] += 1;
-        } catch (err) {
-          counts.error += 1;
-          results.push({
-            index: i + 1,
-            preview: msg.length > 80 ? `${msg.slice(0, 80)}…` : msg,
-            ok: false,
-            error: err.message,
-          });
-        }
-      }
-
-      const ok = results.filter((r) => r.ok).length;
-      setBatchResult({
+      // One server-side fast batch: local extract + Gemini chunks (not 1 call per msg)
+      setProgress({ current: 0, total: messages.length, preview: "Starting fast batch…" });
+      const batch = await api.ingestBatch({ messages, source });
+      setProgress({
+        current: batch.processed || messages.length,
         total: messages.length,
-        processed: ok,
-        failed: counts.error,
-        counts,
-        summary: `Processed ${ok}/${messages.length} — new: ${counts.new_task}, updated: ${counts.update}, needs confirmation: ${counts.contradiction}, noise: ${counts.noise}, errors: ${counts.error}`,
-        results,
+        preview: batch.summary || "Done",
       });
+      setBatchResult(batch);
       await refreshTasks();
     } catch (err) {
       setError(err.message);
@@ -201,8 +178,8 @@ function App() {
         <section className="panel ingest">
           <h2>Forward message(s)</h2>
           <p className="hint">
-            Paste one message, or many — one per line, or blank line between multi-line messages.
-            Up to {MAX_BATCH} at a time. Relative dates use today.
+            Paste one message, or many — one per line (50–70 is fine, target under 4 minutes).
+            Blank line between multi-line messages. Relative dates use today.
           </p>
 
           <div className="presets">
@@ -211,6 +188,15 @@ function App() {
                 {p.label}
               </button>
             ))}
+            <button
+              type="button"
+              className="chip corpus"
+              onClick={loadTestCorpus}
+              disabled={busy}
+              title="85 ordered messages covering all test cases"
+            >
+              Load test corpus ({CORPUS_STATS.total})
+            </button>
           </div>
 
           <form onSubmit={handleIngest} className="form">
@@ -232,7 +218,7 @@ function App() {
                 {messageCount} message{messageCount === 1 ? "" : "s"} detected
                 {messageCount > MAX_BATCH ? ` (max ${MAX_BATCH})` : ""}
                 {messageCount > 5
-                  ? " · large batches take ~12s each due to API rate limits"
+                  ? " · target: finish within ~4 minutes"
                   : ""}
               </p>
             )}
@@ -287,7 +273,11 @@ function App() {
           {batchResult && (
             <div className="result">
               <div className="result-header">
-                <h3>Batch complete</h3>
+                <h3>
+                  Batch complete
+                  {batchResult.elapsed_s != null ? ` · ${batchResult.elapsed_s}s` : ""}
+                  {batchResult.within_sla === false ? " (over SLA)" : ""}
+                </h3>
                 <p className="result-summary">{batchResult.summary}</p>
               </div>
               <div className="batch-list">
